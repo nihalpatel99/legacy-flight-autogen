@@ -1,0 +1,7 @@
+openai
+langchain-openai
+python-dotenv
+autogen
+langchain
+tavily
+streamlit
