@@ -2,6 +2,8 @@
 
 Demo Link: https://legacy-flight-plan.streamlit.app/
 
+Demo Recording:- https://drive.google.com/file/d/1dkTVHkHIbpM4lmwy_c_KPO7ABxemUMfZ/view?usp=sharing
+
 A multi-agent AI web app built with [AutoGen](https://github.com/microsoft/autogen), [Streamlit](https://streamlit.io/), and [Tavily](https://tavily.com/) that helps you find flights on vintage/classic aircraft, check visa requirements, and compare total travel costs — all in a single run.
 
 ---
