@@ -3,6 +3,8 @@ import autogen
 import os
 import threading
 import queue
+import time
+from autogen.io import IOStream
 from tavily import TavilyClient
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -390,12 +392,16 @@ def run_agents(task: str, openai_key: str, tavily_key: str,
             ),
         )
 
-        # Custom PrintSink to capture agent messages into the queue
-        class QueuePrint:
+        # Custom IOStream so autogen's chat output streams into msg_queue live
+        class QueueIOStream:
             def __init__(self, q): self.q = q
-            def __call__(self, *args, **kwargs):
-                msg = " ".join(str(a) for a in args)
+            def print(self, *objects, sep=" ", end="\n", flush=False):
+                msg = sep.join(str(o) for o in objects) + end
                 self.q.put(("msg", msg))
+            def send(self, message):
+                pass
+            def input(self, prompt="", *, password=False):
+                return ""
 
         user_proxy = autogen.UserProxyAgent(
             name="user_proxy",
@@ -413,13 +419,26 @@ def run_agents(task: str, openai_key: str, tavily_key: str,
         )
         manager = autogen.GroupChatManager(groupchat=groupchat, llm_config=llm_config)
 
-        res = user_proxy.initiate_chat(
-            recipient=manager,
-            message=task,
-            summary_method="last_msg",
-        )
+        queue_io = QueueIOStream(msg_queue)
+        with IOStream.set_default(queue_io):
+            res = user_proxy.initiate_chat(
+                recipient=manager,
+                message=task,
+                summary_method="last_msg",
+            )
 
-        msg_queue.put(("summary", res.summary))
+        summary = res.summary.replace("TERMINATE", "").strip() if res.summary else ""
+        if not summary:
+            for m in reversed(groupchat.messages):
+                content = m.get("content")
+                if not content:
+                    continue
+                cleaned = content.replace("TERMINATE", "").strip()
+                if cleaned and cleaned != task.strip():
+                    summary = cleaned
+                    break
+
+        msg_queue.put(("summary", summary))
         msg_queue.put(("done", None))
 
     except Exception as e:
@@ -482,7 +501,6 @@ if st.session_state.status in ("running", "done", "error"):
     # Status pill
     if st.session_state.status == "running":
         st.markdown('<span class="status-pill status-running">⏳ Agents running…</span>', unsafe_allow_html=True)
-        st.button("↻ Refresh", key="refresh")
     elif st.session_state.status == "done":
         st.markdown('<span class="status-pill status-done">✅ Complete</span>', unsafe_allow_html=True)
     elif st.session_state.status == "error":
@@ -501,8 +519,14 @@ if st.session_state.status in ("running", "done", "error"):
         return line
 
     log_html = "\n".join(colorize(l) for l in st.session_state.log_lines[-200:])
+    if log_html:
+        placeholder = log_html
+    elif st.session_state.summary:
+        placeholder = "Complete."
+    else:
+        placeholder = "Waiting for agents…"
     st.markdown(
-        f'<div class="agent-stream">{log_html or "Waiting for agents…"}</div>',
+        f'<div class="agent-stream">{placeholder}</div>',
         unsafe_allow_html=True
     )
 
@@ -514,6 +538,11 @@ if st.session_state.status in ("running", "done", "error"):
         """, unsafe_allow_html=True)
         st.markdown(st.session_state.summary)
         st.markdown("</div>", unsafe_allow_html=True)
+
+    # Auto-poll while the background thread is still running
+    if st.session_state.status == "running":
+        time.sleep(1)
+        st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Footer
